@@ -15,7 +15,12 @@ var COURT_Y_BOTTOM = 520;
 var COURT_Y_TOP = 80;
 var NET_Z = 0.5;
 var NET_HEIGHT_WORLD = 0.06;
-var GRAVITY = 2.8;
+var GRAVITY = 1.5;
+var SERVE_VZ = 0.42;
+var SERVE_VH = 1.1;
+var HIT_BASE_SPEED = 0.35;
+var HIT_VH_MIN = 0.38;
+var HIT_VH_VAR = 0.12;
 var PHYSICS_DT = 1 / 60;
 
 function courtLeftAtZ(z) {
@@ -248,8 +253,8 @@ Player.prototype.updateLocal = function (input, dt) {
     if (input.isDown('ArrowUp')) this.z = Math.min(0.2, this.z + this.depthSpeed * dt);
     if (input.isDown('ArrowDown')) this.z = Math.max(0.0, this.z - this.depthSpeed * dt);
   } else {
-    if (input.isDown('ArrowUp')) this.z = Math.min(1.0, this.z + this.depthSpeed * dt);
-    if (input.isDown('ArrowDown')) this.z = Math.max(0.8, this.z - this.depthSpeed * dt);
+    if (input.isDown('ArrowUp')) this.z = Math.max(0.8, this.z - this.depthSpeed * dt);
+    if (input.isDown('ArrowDown')) this.z = Math.min(1.0, this.z + this.depthSpeed * dt);
   }
 
   this.x = Math.max(0.04, Math.min(0.96, this.x));
@@ -267,9 +272,7 @@ Player.prototype.updateLocal = function (input, dt) {
 Player.prototype.applyRemote = function (data) {
   this.x = data.x;
   this.z = data.z;
-  if (data.swinging && this.swingTimer <= 0) {
-    this.swingTimer = 0.22;
-  }
+  this.swingTimer = data.swinging ? 0.22 : 0;
 };
 
 Player.prototype.getHitboxZRange = function () {
@@ -422,23 +425,35 @@ Ball.prototype.reset = function () {
   this.lastHitBy = null;
 };
 
-Ball.prototype.serve = function (server) {
+Ball.prototype.serve = function (server, serverX) {
   this.active = true;
   this.lastHitBy = server;
 
+  // Serve from the server's current X position
+  this.x = serverX;
+
+  // Target: center of opponent's service box with slight variation
+  var targetX = 0.5 + (Math.random() - 0.5) * 0.25;
+
+  var dz, startZ;
   if (server === 1) {
-    this.x = 0.45 + Math.random() * 0.1;
-    this.z = 0.02;
-    this.vx = (Math.random() - 0.5) * 0.08;
-    this.vz = 0.65;
-    this.vh = 1.1;
+    startZ = 0.02;
+    this.z = startZ;
+    dz = 0.58;
+    this.vz = SERVE_VZ;
   } else {
-    this.x = 0.45 + Math.random() * 0.1;
-    this.z = 0.98;
-    this.vx = (Math.random() - 0.5) * 0.08;
-    this.vz = -0.65;
-    this.vh = 1.1;
+    startZ = 0.98;
+    this.z = startZ;
+    dz = 0.58;
+    this.vz = -SERVE_VZ;
   }
+
+  // Horizontal velocity toward target
+  var dx = targetX - this.x;
+  var travelTime = Math.abs(dz / this.vz);
+  this.vx = dx / travelTime;
+
+  this.vh = SERVE_VH;
   this.h = 0.01;
 };
 
@@ -485,12 +500,10 @@ Ball.prototype.hit = function (playerNum, playerX, playerZ) {
   if (!this.active) return;
   this.lastHitBy = playerNum;
 
-  var baseSpeed = 0.55;
-
   if (playerNum === 1) {
-    this.vz = Math.abs(this.vz) + baseSpeed;
+    this.vz = Math.abs(this.vz) + HIT_BASE_SPEED;
   } else {
-    this.vz = -(Math.abs(this.vz) + baseSpeed);
+    this.vz = -(Math.abs(this.vz) + HIT_BASE_SPEED);
   }
 
   // Angle based on hit position
@@ -498,11 +511,11 @@ Ball.prototype.hit = function (playerNum, playerX, playerZ) {
   this.vx += offsetX * 1.8;
 
   // Clamp horizontal velocity
-  var maxVx = 0.3;
+  var maxVx = 0.22;
   if (this.vx > maxVx) this.vx = maxVx;
   if (this.vx < -maxVx) this.vx = -maxVx;
 
-  this.vh = 0.5 + Math.random() * 0.2;
+  this.vh = HIT_VH_MIN + Math.random() * HIT_VH_VAR;
   this.h = 0.01;
 };
 
@@ -607,6 +620,7 @@ function Game(canvas, isHost, peer, localPlayerNum) {
   this.lastTime = 0;
 
   this.setupNetwork();
+  this.setupRestartButton();
 }
 
 Game.prototype.setupNetwork = function () {
@@ -651,7 +665,46 @@ Game.prototype.setupNetwork = function () {
       self.ball.active = msg.ball.active;
       self.ball.lastHitBy = msg.server;
     }
+
+    if (msg.type === 'restart') {
+      self.resetGame();
+    }
   });
+};
+
+Game.prototype.setupRestartButton = function () {
+  var self = this;
+  var btn = document.getElementById('btn-restart');
+  if (!btn) return;
+
+  btn.addEventListener('click', function () {
+    if (self.state === 'GAME_OVER') {
+      self.safeSend(JSON.stringify({ type: 'restart' }));
+      self.resetGame();
+    }
+  });
+};
+
+Game.prototype.resetGame = function () {
+  this.score.reset();
+  this.ball.reset();
+  this.p1.x = 0.5;
+  this.p1.z = 0.05;
+  this.p2.x = 0.5;
+  this.p2.z = 0.95;
+  this.p1.swingTimer = 0;
+  this.p2.swingTimer = 0;
+  this.state = 'READY';
+  this.server = 1;
+  this.stateTimer = 0.6;
+  this.pointResult = null;
+  this.faults = 0;
+  this.forceSend = true;
+
+  var btn = document.getElementById('btn-restart');
+  if (btn) btn.classList.add('hidden');
+
+  this.updateHUD();
 };
 
 Game.prototype.applyGameState = function (msg) {
@@ -780,6 +833,13 @@ Game.prototype.update = function (dt) {
   var local = this.localPlayerNum === 1 ? this.p1 : this.p2;
   local.updateLocal(this.input, dt);
 
+  // Decrement remote player's swing timer (was never decrementing before)
+  var remote = this.localPlayerNum === 1 ? this.p2 : this.p1;
+  if (remote.swingTimer > 0) {
+    remote.swingTimer -= dt;
+    if (remote.swingTimer < 0) remote.swingTimer = 0;
+  }
+
   if (this.isHost) {
     // === HOST AUTHORITATIVE LOGIC ===
 
@@ -796,7 +856,7 @@ Game.prototype.update = function (dt) {
     if (this.state === 'WAITING_SERVE') {
       var serverPlayer = this.server === 1 ? this.p1 : this.p2;
       if (serverPlayer.swingTimer > 0 && serverPlayer.swingTimer > 0.15) {
-        this.ball.serve(this.server);
+        this.ball.serve(this.server, serverPlayer.x);
         this.state = 'RALLY';
         this.sendServe(this.server);
         this.forceSend = true;
@@ -890,13 +950,105 @@ Game.prototype.render = function () {
   var ctx = this.ctx;
   ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
+  // Guest sees the court mirrored: their player at bottom, opponent at top
+  var flipDisplay = this.localPlayerNum > 1;
+
   this.court.render(ctx);
-  this.p2.render(ctx);
-  this.ball.render(ctx);
-  this.p1.render(ctx);
+
+  // Determine who is the "bottom" and "top" player in display space
+  var bottomPlayer, topPlayer;
+  if (flipDisplay) {
+    bottomPlayer = this.p2; // guest sees themselves (P2) at bottom
+    topPlayer = this.p1;    // guest sees host (P1) at top
+  } else {
+    bottomPlayer = this.p1; // host sees themselves (P1) at bottom
+    topPlayer = this.p2;    // host sees guest (P2) at top
+  }
+
+  // Render top (far) player first (behind ball) — this is always the opponent
+  this.renderPlayerAt(ctx, topPlayer, flipDisplay, true);
+  // Render ball
+  this.renderBallAt(ctx, flipDisplay);
+  // Render bottom (near) player last (in front of ball) — this is always the local player
+  this.renderPlayerAt(ctx, bottomPlayer, flipDisplay, false);
 
   this.renderMessages(ctx);
   this.updateHUD();
+};
+
+Game.prototype.renderPlayerAt = function (ctx, player, flipZ, flipX) {
+  var displayZ = flipZ ? (1 - player.z) : player.z;
+  var displayX = flipX ? (1 - player.x) : player.x;
+  var isBottomPlayer = (displayZ < 0.5);
+
+  var pos = worldToScreen(displayX, displayZ);
+  var scale = pos.scale;
+  var baseSize = isBottomPlayer ? 56 : 28;
+  var size = Math.floor(baseSize * scale);
+  if (size < 8) size = 8;
+
+  var sx = Math.floor(pos.x - size / 2);
+  var sy = Math.floor(pos.y - size);
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+  ctx.beginPath();
+  ctx.ellipse(pos.x, pos.y, size * 0.4, size * 0.12, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Draw appropriate face based on display position, not world side
+  if (isBottomPlayer) {
+    player.renderBack(ctx, sx, sy, size);
+  } else {
+    player.renderFront(ctx, sx, sy, size);
+  }
+
+  // Swing arc
+  if (player.swingTimer > 0) {
+    var alpha = Math.sin(player.swingTimer / 0.22 * Math.PI);
+    ctx.strokeStyle = 'rgba(255, 255, 100, ' + alpha.toFixed(2) + ')';
+    ctx.lineWidth = 2 * scale;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y - size * 0.5, size * 0.6, -Math.PI * 0.6, Math.PI * 0.1, false);
+    ctx.stroke();
+  }
+};
+
+Game.prototype.renderBallAt = function (ctx, flipZ) {
+  if (!this.ball.active) return;
+
+  var displayZ = flipZ ? (1 - this.ball.z) : this.ball.z;
+  var displayX = this.ball.x;
+
+  var ground = worldToScreen(displayX, displayZ);
+  var scale = ground.scale;
+  var ballSize = Math.floor(8 * scale);
+  if (ballSize < 3) ballSize = 3;
+
+  // Shadow on ground
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+  ctx.beginPath();
+  ctx.ellipse(ground.x, ground.y, ballSize * 0.8, ballSize * 0.35, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Ball sprite (rises with height)
+  var heightOffset = this.ball.h * 280 * scale;
+  var ballSx = Math.floor(ground.x - ballSize / 2);
+  var ballSy = Math.floor(ground.y - ballSize - heightOffset);
+
+  // Glow
+  if (this.ball.h > 0.05) {
+    ctx.fillStyle = 'rgba(255, 255, 100, 0.3)';
+    ctx.fillRect(ballSx - 2, ballSy - 2, ballSize + 4, ballSize + 4);
+  }
+
+  // Ball body
+  ctx.fillStyle = '#ccff00';
+  ctx.fillRect(ballSx, ballSy, ballSize, ballSize);
+
+  // Highlight
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(ballSx + 1, ballSy, Math.floor(ballSize * 0.5), 1);
 };
 
 Game.prototype.renderMessages = function (ctx) {
@@ -905,7 +1057,8 @@ Game.prototype.renderMessages = function (ctx) {
   ctx.font = '12px "Press Start 2P", monospace';
 
   if (this.state === 'WAITING_SERVE') {
-    var text = 'Player ' + this.server + ' — Pressione Espaco para Sacar';
+    var whoServes = this.server === this.localPlayerNum ? 'Voce' : ('Player ' + this.server);
+    var text = whoServes + ' — Pressione Espaco para Sacar';
     ctx.fillStyle = '#000000';
     ctx.fillText(text, cx - ctx.measureText(text).width / 2 + 2, this.canvas.height - 20 + 2);
     ctx.fillStyle = '#ccff00';
@@ -927,6 +1080,13 @@ Game.prototype.renderMessages = function (ctx) {
     ctx.fillRect(0, cy - 40, this.canvas.width, 80);
     ctx.fillStyle = '#ccff00';
     ctx.fillText(winner, cx - ctx.measureText(winner).width / 2, cy + 6);
+
+    // Show restart button
+    var btn = document.getElementById('btn-restart');
+    if (btn) btn.classList.remove('hidden');
+  } else {
+    var btn = document.getElementById('btn-restart');
+    if (btn && !btn.classList.contains('hidden')) btn.classList.add('hidden');
   }
 };
 
@@ -935,20 +1095,40 @@ Game.prototype.updateHUD = function () {
   var p1El = document.getElementById('score-p1');
   var p2El = document.getElementById('score-p2');
 
+  // For guest (player 2): show own score (P2) on left, opponent (P1) on right
+  var leftLabel, leftScore, rightLabel, rightScore;
+  var leftServer, rightServer;
+
+  if (this.localPlayerNum === 1) {
+    leftLabel = 'P1';
+    leftScore = display.p1;
+    rightLabel = 'P2';
+    rightScore = display.p2;
+    leftServer = 1;
+    rightServer = 2;
+  } else {
+    leftLabel = 'P2';
+    leftScore = display.p2;
+    rightLabel = 'P1';
+    rightScore = display.p1;
+    leftServer = 2;
+    rightServer = 1;
+  }
+
   if (p1El) {
-    var p1Text = 'P1: ' + display.p1;
-    if (this.server === 1 && this.state !== 'POINT_ENDED' && this.state !== 'GAME_OVER') {
-      p1Text += ' *';
+    var leftText = leftLabel + ': ' + leftScore;
+    if (this.server === leftServer && this.state !== 'POINT_ENDED' && this.state !== 'GAME_OVER') {
+      leftText += ' *';
     }
-    p1El.textContent = p1Text;
+    p1El.textContent = leftText;
   }
 
   if (p2El) {
-    var p2Text = 'P2: ' + display.p2;
-    if (this.server === 2 && this.state !== 'POINT_ENDED' && this.state !== 'GAME_OVER') {
-      p2Text += ' *';
+    var rightText = rightLabel + ': ' + rightScore;
+    if (this.server === rightServer && this.state !== 'POINT_ENDED' && this.state !== 'GAME_OVER') {
+      rightText += ' *';
     }
-    p2El.textContent = p2Text;
+    p2El.textContent = rightText;
   }
 };
 

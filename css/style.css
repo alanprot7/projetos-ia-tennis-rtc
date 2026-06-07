@@ -210,6 +210,35 @@ body {
   padding: 6px 12px;
 }
 
+#btn-restart {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 10px;
+  padding: 10px 24px;
+  background: #cc3333;
+  color: #fff;
+  border: 2px solid #fff;
+  cursor: pointer;
+  position: absolute;
+  bottom: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  text-transform: uppercase;
+  transition: background 0.15s;
+}
+
+#btn-restart:hover {
+  background: #ee4444;
+}
+
+#btn-restart:active {
+  background: #992222;
+}
+
+#btn-restart.hidden {
+  display: none;
+}
+
 /* ============================================================
    RESPONSIVE (opcional)
    ============================================================ */
