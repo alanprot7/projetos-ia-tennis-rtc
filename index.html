@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tennis RTC</title>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- LOBBY -->
+    <div id="lobby">
+      <h1>TENNIS RTC</h1>
+
+      <div id="connection-panel">
+
+        <!-- Criar Sala -->
+        <div class="panel">
+          <h2>Criar Sala</h2>
+          <p>Voce sera o Jogador 1 (parte de baixo da quadra).</p>
+          <button id="btn-create">Criar Sala</button>
+
+          <div id="offer-section" class="hidden">
+            <p>Copie este codigo e envie para o oponente:</p>
+            <textarea id="offer-text" readonly></textarea>
+            <button id="btn-copy-offer">Copiar</button>
+
+            <p>Cole a resposta do oponente aqui:</p>
+            <textarea id="answer-input" placeholder="Cole a resposta aqui..."></textarea>
+            <button id="btn-apply-answer">Conectar</button>
+          </div>
+          <div id="offer-status"></div>
+        </div>
+
+        <div class="divider"><span>OU</span></div>
+
+        <!-- Entrar em Sala -->
+        <div class="panel">
+          <h2>Entrar em Sala</h2>
+          <p>Voce sera o Jogador 2 (parte de cima da quadra).</p>
+          <p>Cole o codigo recebido do criador:</p>
+          <textarea id="offer-input" placeholder="Cole a oferta aqui..."></textarea>
+          <button id="btn-join">Entrar</button>
+
+          <div id="answer-section" class="hidden">
+            <p>Copie esta resposta e envie de volta:</p>
+            <textarea id="answer-text" readonly></textarea>
+            <button id="btn-copy-answer">Copiar</button>
+          </div>
+          <div id="join-status"></div>
+        </div>
+
+      </div>
+
+      <div id="connection-status">Aguardando...</div>
+    </div>
+
+    <!-- GAME SCREEN -->
+    <div id="game-screen" class="hidden">
+      <canvas id="game-canvas" width="800" height="600"></canvas>
+      <div id="hud">
+        <span id="score-p1">P1: 0</span>
+        <span id="score-p2">P2: 0</span>
+      </div>
+      <div id="state-indicator"></div>
+    </div>
+
+  </div>
+
+  <script src="js/webrtc-peer.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
