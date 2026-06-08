@@ -442,6 +442,9 @@ Ball.prototype.reset = function () {
   this.vh = 0;
   this.active = false;
   this.lastHitBy = null;
+  this.prevZ = undefined;
+  this.justBounced = false;
+  this.justServed = false;
 };
 
 Ball.prototype.serve = function (server, serverX) {
@@ -512,6 +515,8 @@ Ball.prototype.serveHit = function (server, serverX) {
 Ball.prototype.update = function (dt) {
   if (!this.active) return;
 
+  this.justBounced = false;
+
   this.vh -= GRAVITY * dt;
 
   this.x += this.vx * dt;
@@ -522,6 +527,7 @@ Ball.prototype.update = function (dt) {
   if (this.h <= 0) {
     this.h = 0;
     if (Math.abs(this.vh) > 0.03) {
+      this.justBounced = true;
       this.vh = Math.abs(this.vh) * 0.6;
       this.vx *= 0.92;
       this.vz *= 0.92;
@@ -592,7 +598,7 @@ Ball.prototype.checkOutOfBounds = function () {
   }
 
   // Double bounce check (ball stopped moving on ground)
-  if (this.h <= 0.001 && Math.abs(this.vx) < 0.005 && Math.abs(this.vz) < 0.005 && this.prevZ !== undefined) {
+  if (this.h <= 0.001 && Math.abs(this.vx) < 0.001 && Math.abs(this.vz) < 0.001 && this.prevZ !== undefined) {
     if (this.z < NET_Z) {
       this.active = false;
       return { scoredBy: 2, reason: 'double_bounce' };
@@ -767,6 +773,7 @@ Game.prototype.applyGameState = function (msg) {
   this.ball.h = msg.ball.h;
   this.ball.vx = msg.ball.vx;
   this.ball.vz = msg.ball.vz;
+  this.ball.vh = msg.ball.vh;
   this.ball.active = msg.ball.active;
   if (msg.ball.prevZ !== undefined) this.ball.prevZ = msg.ball.prevZ;
   this.ball.lastHitBy = msg.ball.lastHitBy;
@@ -805,7 +812,7 @@ Game.prototype.sendGameState = function () {
     type: 'game_state',
     ball: {
       x: this.ball.x, z: this.ball.z, h: this.ball.h,
-      vx: this.ball.vx, vz: this.ball.vz,
+      vx: this.ball.vx, vz: this.ball.vz, vh: this.ball.vh,
       active: this.ball.active, prevZ: this.ball.prevZ,
       lastHitBy: this.ball.lastHitBy
     },
@@ -950,10 +957,15 @@ Game.prototype.update = function (dt) {
     if (this.state === 'RALLY') {
       this.ball.update(dt);
 
-      // Clear justServed when ball successfully crosses net
-      if (this.ball.justServed) {
-        if ((this.server === 1 && this.ball.z > NET_Z) || (this.server === 2 && this.ball.z < NET_Z)) {
-          this.ball.justServed = false;
+      // Check service box on first bounce after serve
+      if (this.ball.justServed && this.ball.justBounced) {
+        var onOpponentSide = (this.server === 1 && this.ball.z > NET_Z) || (this.server === 2 && this.ball.z < NET_Z);
+        if (onOpponentSide) {
+          var serviceBoxStart = this.server === 1 ? NET_Z : 0.25;
+          var serviceBoxEnd = this.server === 1 ? 0.75 : NET_Z;
+          if (this.ball.z >= serviceBoxStart && this.ball.z <= serviceBoxEnd) {
+            this.ball.justServed = false;
+          }
         }
       }
 
@@ -1106,9 +1118,9 @@ Game.prototype.render = function () {
   this.updateHUD();
 };
 
-Game.prototype.renderPlayerAt = function (ctx, player, flipZ, flipX) {
+Game.prototype.renderPlayerAt = function (ctx, player, flipZ, mirrorSprite) {
   var displayZ = flipZ ? (1 - player.z) : player.z;
-  var displayX = flipX ? (1 - player.x) : player.x;
+  var displayX = player.x;
   var isBottomPlayer = (displayZ < 0.5);
 
   var pos = worldToScreen(displayX, displayZ);
@@ -1120,11 +1132,18 @@ Game.prototype.renderPlayerAt = function (ctx, player, flipZ, flipX) {
   var sx = Math.floor(pos.x - size / 2);
   var sy = Math.floor(pos.y - size);
 
-  // Shadow
+  // Shadow (symmetric, drawn before mirror transform)
   ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
   ctx.beginPath();
   ctx.ellipse(pos.x, pos.y, size * 0.4, size * 0.12, 0, 0, Math.PI * 2);
   ctx.fill();
+
+  if (mirrorSprite) {
+    ctx.save();
+    ctx.translate(pos.x, 0);
+    ctx.scale(-1, 1);
+    ctx.translate(-pos.x, 0);
+  }
 
   // Draw appropriate face based on display position, not world side
   if (isBottomPlayer) {
@@ -1133,7 +1152,7 @@ Game.prototype.renderPlayerAt = function (ctx, player, flipZ, flipX) {
     player.renderFront(ctx, sx, sy, size);
   }
 
-  // Swing arc
+  // Swing arc (mirrored along with sprite)
   if (player.swingTimer > 0) {
     var alpha = Math.sin(player.swingTimer / 0.22 * Math.PI);
     ctx.strokeStyle = 'rgba(255, 255, 100, ' + alpha.toFixed(2) + ')';
@@ -1141,6 +1160,10 @@ Game.prototype.renderPlayerAt = function (ctx, player, flipZ, flipX) {
     ctx.beginPath();
     ctx.arc(pos.x, pos.y - size * 0.5, size * 0.6, -Math.PI * 0.6, Math.PI * 0.1, false);
     ctx.stroke();
+  }
+
+  if (mirrorSprite) {
+    ctx.restore();
   }
 };
 
