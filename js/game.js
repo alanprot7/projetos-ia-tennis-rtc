@@ -370,7 +370,7 @@ function Player(side) {
   this.z = side === 0 ? 0.05 : 0.95;
   this.vx = 0;     // lateral speed (used for ball sidespin transfer)
   this.swingTimer = 0;
-  this.baseSize = side === 0 ? 56 : 40;
+  this.baseSize = side === 0 ? 56 : 50;
   this.speed = 0.4;
   this.depthSpeed = 0.2;
   this.autoReturn = false;
@@ -1295,7 +1295,7 @@ Game.prototype.renderPlayerAt = function (ctx, player, flipZ, mirrorSprite) {
 
   var pos = worldToScreen(displayX, displayZ);
   var scale = pos.scale;
-  var baseSize = isBottomPlayer ? 56 : 40;
+  var baseSize = isBottomPlayer ? 56 : 50;
   var size = Math.floor(baseSize * scale);
   if (size < 8) size = 8;
 
