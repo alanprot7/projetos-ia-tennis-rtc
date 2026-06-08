@@ -1383,36 +1383,40 @@ Game.prototype.renderMessages = function (ctx) {
     var whoServes = this.server === this.localPlayerNum ? 'Voce' : ('Player ' + this.server);
     var faultMsg = this.faults > 0 ? ' (2a tentativa)' : '';
     var text = whoServes + ' — Pressione Espaco para lancar' + faultMsg;
-    ctx.fillStyle = '#000000';
-    ctx.fillText(text, cx - ctx.measureText(text).width / 2 + 2, this.canvas.height - 20 + 2);
+    var tw = ctx.measureText(text).width;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, this.canvas.height - 36, this.canvas.width, 36);
     ctx.fillStyle = '#ccff00';
-    ctx.fillText(text, cx - ctx.measureText(text).width / 2, this.canvas.height - 20);
+    ctx.fillText(text, cx - tw / 2, this.canvas.height - 12);
   }
 
   if (this.state === 'SERVE_TOSS') {
     var whoServes2 = this.server === this.localPlayerNum ? 'Voce' : ('Player ' + this.server);
     var text2 = whoServes2 + ' — Pressione Espaco para Bater';
-    ctx.fillStyle = '#000000';
-    ctx.fillText(text2, cx - ctx.measureText(text2).width / 2 + 2, this.canvas.height - 20 + 2);
+    var tw2 = ctx.measureText(text2).width;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, this.canvas.height - 36, this.canvas.width, 36);
     ctx.fillStyle = '#ccff00';
-    ctx.fillText(text2, cx - ctx.measureText(text2).width / 2, this.canvas.height - 20);
+    ctx.fillText(text2, cx - tw2 / 2, this.canvas.height - 12);
   }
 
   if (this.state === 'POINT_ENDED' && this.pointResult) {
     var playerName = this.pointResult.winner === this.localPlayerNum ? 'Voce' : ('Player ' + this.pointResult.winner);
     var text = playerName + ' marcou!';
-    ctx.fillStyle = '#000000';
-    ctx.fillText(text, cx - ctx.measureText(text).width / 2 + 2, cy + 2);
+    var tw = ctx.measureText(text).width;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, cy - 28, this.canvas.width, 56);
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(text, cx - ctx.measureText(text).width / 2, cy);
+    ctx.fillText(text, cx - tw / 2, cy + 6);
   }
 
   if (this.state === 'GAME_OVER') {
     var winner = this.score.winner === this.localPlayerNum ? 'Voce Venceu!' : ('Player ' + this.score.winner + ' Venceu!');
+    var tw = ctx.measureText(winner).width;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
     ctx.fillRect(0, cy - 40, this.canvas.width, 80);
     ctx.fillStyle = '#ccff00';
-    ctx.fillText(winner, cx - ctx.measureText(winner).width / 2, cy + 6);
+    ctx.fillText(winner, cx - tw / 2, cy + 6);
 
     // Show restart button
     var btn = document.getElementById('btn-restart');
