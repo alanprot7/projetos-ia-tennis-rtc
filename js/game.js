@@ -18,6 +18,7 @@ var NET_HEIGHT_WORLD = 0.06;
 var GRAVITY = 1.5;
 var SERVE_VZ = 0.42;
 var SERVE_VH = 1.1;
+var SERVE_TOSS_VH = 0.7;
 var HIT_BASE_SPEED = 0.35;
 var HIT_VH_MIN = 0.38;
 var HIT_VH_VAR = 0.12;
@@ -238,7 +239,7 @@ function Player(side) {
   this.x = 0.5;
   this.z = side === 0 ? 0.05 : 0.95;
   this.swingTimer = 0;
-  this.baseSize = side === 0 ? 56 : 28;
+  this.baseSize = side === 0 ? 56 : 40;
   this.speed = 0.4;
   this.depthSpeed = 0.2;
   this.autoReturn = false;
@@ -272,7 +273,11 @@ Player.prototype.updateLocal = function (input, dt) {
 Player.prototype.applyRemote = function (data) {
   this.x = data.x;
   this.z = data.z;
-  this.swingTimer = data.swinging ? 0.22 : 0;
+  if (data.swinging && this.swingTimer <= 0) {
+    this.swingTimer = 0.22;
+  } else if (!data.swinging) {
+    this.swingTimer = 0;
+  }
 };
 
 Player.prototype.getHitboxZRange = function () {
@@ -290,6 +295,20 @@ Player.prototype.canHit = function (ballX, ballZ, ballH) {
   if (ballZ < zRange.min || ballZ > zRange.max) return false;
 
   var reach = 0.14;
+  if (Math.abs(ballX - this.x) > reach) return false;
+
+  return true;
+};
+
+Player.prototype.canHitServe = function (ballX, ballZ, ballH) {
+  if (ballH < 0.05) return false;
+  if (ballH > 0.3) return false;
+  if (this.swingTimer <= 0) return false;
+
+  var zRange = this.getHitboxZRange();
+  if (ballZ < zRange.min || ballZ > zRange.max) return false;
+
+  var reach = 0.2;
   if (Math.abs(ballX - this.x) > reach) return false;
 
   return true;
@@ -341,7 +360,7 @@ Player.prototype.renderBack = function (ctx, sx, sy, size) {
   ctx.fillRect(p(sx + size * 0.53), p(sy + size * 0.9), p(size * 0.15), p(size * 0.1));
 
   // Body (shirt)
-  ctx.fillStyle = '#e8e8e8';
+  ctx.fillStyle = this.side === 0 ? '#e8e8e8' : '#cc3333';
   ctx.fillRect(p(sx + size * 0.22), p(sy + size * 0.26), p(size * 0.56), p(size * 0.36));
 
   // Arms
@@ -377,8 +396,8 @@ Player.prototype.renderFront = function (ctx, sx, sy, size) {
   ctx.fillRect(p(sx + size * 0.27), p(sy + size * 0.9), p(size * 0.18), p(size * 0.1));
   ctx.fillRect(p(sx + size * 0.55), p(sy + size * 0.9), p(size * 0.18), p(size * 0.1));
 
-  // Body (red shirt)
-  ctx.fillStyle = '#cc3333';
+  // Body (shirt)
+  ctx.fillStyle = this.side === 0 ? '#e8e8e8' : '#cc3333';
   ctx.fillRect(p(sx + size * 0.2), p(sy + size * 0.28), p(size * 0.6), p(size * 0.34));
 
   // Arms
@@ -455,6 +474,39 @@ Ball.prototype.serve = function (server, serverX) {
 
   this.vh = SERVE_VH;
   this.h = 0.01;
+};
+
+Ball.prototype.toss = function (server, serverX) {
+  this.active = true;
+  this.lastHitBy = server;
+
+  this.x = serverX;
+  if (server === 1) {
+    this.z = 0.05;
+  } else {
+    this.z = 0.95;
+  }
+
+  this.vx = 0;
+  this.vz = 0;
+  this.vh = SERVE_TOSS_VH;
+  this.h = 0.01;
+};
+
+Ball.prototype.serveHit = function (server, serverX) {
+  this.lastHitBy = server;
+
+  if (server === 1) {
+    this.vz = SERVE_VZ;
+  } else {
+    this.vz = -SERVE_VZ;
+  }
+
+  var targetX = 0.5 + (Math.random() - 0.5) * 0.3;
+  this.vx = (targetX - serverX) * 0.4;
+
+  this.vh = 0.7 + this.h * 1.5;
+  this.justServed = true;
 };
 
 Ball.prototype.update = function (dt) {
@@ -699,6 +751,7 @@ Game.prototype.resetGame = function () {
   this.stateTimer = 0.6;
   this.pointResult = null;
   this.faults = 0;
+  this.serveTossTimer = 0;
   this.forceSend = true;
 
   var btn = document.getElementById('btn-restart');
@@ -732,6 +785,7 @@ Game.prototype.applyGameState = function (msg) {
   this.server = msg.server;
   this.stateTimer = msg.stateTimer || 0;
   this.pointResult = msg.pointResult || null;
+  this.faults = msg.faults || 0;
 
   this.updateHUD();
 };
@@ -766,7 +820,8 @@ Game.prototype.sendGameState = function () {
     state: this.state,
     server: this.server,
     stateTimer: this.stateTimer,
-    pointResult: this.pointResult
+    pointResult: this.pointResult,
+    faults: this.faults
   };
   this.safeSend(JSON.stringify(msg));
 };
@@ -856,36 +911,91 @@ Game.prototype.update = function (dt) {
     if (this.state === 'WAITING_SERVE') {
       var serverPlayer = this.server === 1 ? this.p1 : this.p2;
       if (serverPlayer.swingTimer > 0 && serverPlayer.swingTimer > 0.15) {
-        this.ball.serve(this.server, serverPlayer.x);
+        this.ball.toss(this.server, serverPlayer.x);
+        this.state = 'SERVE_TOSS';
+        this.serveTossTimer = 0;
+        this.forceSend = true;
+      }
+    }
+
+    if (this.state === 'SERVE_TOSS') {
+      this.ball.update(dt);
+      this.serveTossTimer = (this.serveTossTimer || 0) + dt;
+
+      var serverPlayer = this.server === 1 ? this.p1 : this.p2;
+      if (serverPlayer.canHitServe(this.ball.x, this.ball.z, this.ball.h)) {
+        this.ball.serveHit(this.server, serverPlayer.x);
         this.state = 'RALLY';
         this.sendServe(this.server);
         this.forceSend = true;
+      } else if (this.serveTossTimer > 2.5) {
+        this.faults++;
+        if (this.faults >= 2) {
+          var receiver = this.server === 1 ? 2 : 1;
+          this.score.addPoint(receiver);
+          this.state = 'POINT_ENDED';
+          this.stateTimer = 2.2;
+          this.pointResult = { winner: receiver, reason: 'double_fault' };
+          this.sendPointScored(receiver, 'double_fault');
+        } else {
+          this.state = 'WAITING_SERVE';
+          this.ball.reset();
+        }
+        this.ball.active = false;
+        this.forceSend = true;
+        this.updateHUD();
       }
     }
 
     if (this.state === 'RALLY') {
       this.ball.update(dt);
 
+      // Clear justServed when ball successfully crosses net
+      if (this.ball.justServed) {
+        if ((this.server === 1 && this.ball.z > NET_Z) || (this.server === 2 && this.ball.z < NET_Z)) {
+          this.ball.justServed = false;
+        }
+      }
+
       // Collision: P1
       if (this.p1.canHit(this.ball.x, this.ball.z, this.ball.h)) {
         this.ball.hit(1, this.p1.x, this.p1.z);
+        this.ball.justServed = false;
       }
 
       // Collision: P2
       if (this.p2.canHit(this.ball.x, this.ball.z, this.ball.h)) {
         this.ball.hit(2, this.p2.x, this.p2.z);
+        this.ball.justServed = false;
       }
 
       // Check out of bounds
       var result = this.ball.checkOutOfBounds();
       if (result) {
-        this.score.addPoint(result.scoredBy);
-        this.state = 'POINT_ENDED';
-        this.stateTimer = 2.2;
-        this.pointResult = { winner: result.scoredBy, reason: result.reason };
-        this.sendPointScored(result.scoredBy, result.reason);
-        this.forceSend = true;
-        this.updateHUD();
+        if (this.ball.justServed) {
+          this.ball.justServed = false;
+          this.faults++;
+          if (this.faults >= 2) {
+            this.score.addPoint(result.scoredBy);
+            this.state = 'POINT_ENDED';
+            this.stateTimer = 2.2;
+            this.pointResult = { winner: result.scoredBy, reason: 'double_fault' };
+            this.sendPointScored(result.scoredBy, 'double_fault');
+          } else {
+            this.state = 'WAITING_SERVE';
+            this.ball.reset();
+          }
+          this.forceSend = true;
+          this.updateHUD();
+        } else {
+          this.score.addPoint(result.scoredBy);
+          this.state = 'POINT_ENDED';
+          this.stateTimer = 2.2;
+          this.pointResult = { winner: result.scoredBy, reason: result.reason };
+          this.sendPointScored(result.scoredBy, result.reason);
+          this.forceSend = true;
+          this.updateHUD();
+        }
       }
 
       // Check for stuck ball
@@ -893,16 +1003,36 @@ Game.prototype.update = function (dt) {
         if (this.ball.stuckTimer === undefined) this.ball.stuckTimer = 0;
         this.ball.stuckTimer += dt;
         if (this.ball.stuckTimer > 1.5) {
-          var scoredBy = this.ball.lastHitBy === 1 ? 2 : 1;
-          this.score.addPoint(scoredBy);
-          this.state = 'POINT_ENDED';
-          this.stateTimer = 2.2;
-          this.pointResult = { winner: scoredBy, reason: 'no_return' };
-          this.sendPointScored(scoredBy, 'no_return');
-          this.ball.active = false;
-          this.ball.stuckTimer = 0;
-          this.forceSend = true;
-          this.updateHUD();
+          if (this.ball.justServed) {
+            this.ball.justServed = false;
+            this.faults++;
+            if (this.faults >= 2) {
+              var receiverS = this.server === 1 ? 2 : 1;
+              this.score.addPoint(receiverS);
+              this.state = 'POINT_ENDED';
+              this.stateTimer = 2.2;
+              this.pointResult = { winner: receiverS, reason: 'double_fault' };
+              this.sendPointScored(receiverS, 'double_fault');
+            } else {
+              this.state = 'WAITING_SERVE';
+              this.ball.reset();
+            }
+            this.ball.active = false;
+            this.ball.stuckTimer = 0;
+            this.forceSend = true;
+            this.updateHUD();
+          } else {
+            var scoredBy = this.ball.lastHitBy === 1 ? 2 : 1;
+            this.score.addPoint(scoredBy);
+            this.state = 'POINT_ENDED';
+            this.stateTimer = 2.2;
+            this.pointResult = { winner: scoredBy, reason: 'no_return' };
+            this.sendPointScored(scoredBy, 'no_return');
+            this.ball.active = false;
+            this.ball.stuckTimer = 0;
+            this.forceSend = true;
+            this.updateHUD();
+          }
         }
       } else {
         this.ball.stuckTimer = 0;
@@ -983,7 +1113,7 @@ Game.prototype.renderPlayerAt = function (ctx, player, flipZ, flipX) {
 
   var pos = worldToScreen(displayX, displayZ);
   var scale = pos.scale;
-  var baseSize = isBottomPlayer ? 56 : 28;
+  var baseSize = isBottomPlayer ? 56 : 40;
   var size = Math.floor(baseSize * scale);
   if (size < 8) size = 8;
 
@@ -1058,11 +1188,21 @@ Game.prototype.renderMessages = function (ctx) {
 
   if (this.state === 'WAITING_SERVE') {
     var whoServes = this.server === this.localPlayerNum ? 'Voce' : ('Player ' + this.server);
-    var text = whoServes + ' — Pressione Espaco para Sacar';
+    var faultMsg = this.faults > 0 ? ' (2a tentativa)' : '';
+    var text = whoServes + ' — Pressione Espaco para lancar' + faultMsg;
     ctx.fillStyle = '#000000';
     ctx.fillText(text, cx - ctx.measureText(text).width / 2 + 2, this.canvas.height - 20 + 2);
     ctx.fillStyle = '#ccff00';
     ctx.fillText(text, cx - ctx.measureText(text).width / 2, this.canvas.height - 20);
+  }
+
+  if (this.state === 'SERVE_TOSS') {
+    var whoServes2 = this.server === this.localPlayerNum ? 'Voce' : ('Player ' + this.server);
+    var text2 = whoServes2 + ' — Pressione Espaco para Bater';
+    ctx.fillStyle = '#000000';
+    ctx.fillText(text2, cx - ctx.measureText(text2).width / 2 + 2, this.canvas.height - 20 + 2);
+    ctx.fillStyle = '#ccff00';
+    ctx.fillText(text2, cx - ctx.measureText(text2).width / 2, this.canvas.height - 20);
   }
 
   if (this.state === 'POINT_ENDED' && this.pointResult) {
