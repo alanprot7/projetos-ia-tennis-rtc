@@ -22,6 +22,7 @@ var VEL_AVANCO_FIXO = 0.65;      // forward speed on hit
 var VEL_LATERAL_MAX = 0.10;      // max lateral speed on hit
 var GRAVIDADE = 1.5;             // gravity applied each second
 var RESTITUICAO_SOLO = 0.6;      // bounce restitution (0-1)
+var FATOR_INFLUENCIA_LATERAL = 1.0; // how much player movement transfers to ball sidespin
 
 var SERVE_TOSS_VH = 0.7;
 var PHYSICS_DT = 1 / 60;
@@ -367,6 +368,7 @@ function Player(side) {
   this.side = side;
   this.x = 0.5;
   this.z = side === 0 ? 0.05 : 0.95;
+  this.vx = 0;     // lateral speed (used for ball sidespin transfer)
   this.swingTimer = 0;
   this.baseSize = side === 0 ? 56 : 40;
   this.speed = 0.4;
@@ -376,18 +378,23 @@ function Player(side) {
 }
 
 Player.prototype.updateLocal = function (input, dt) {
+  var prevX = this.x;
+
   if (input.isDown('ArrowLeft')) this.x -= this.speed * dt;
   if (input.isDown('ArrowRight')) this.x += this.speed * dt;
 
   if (this.side === 0) {
-    if (input.isDown('ArrowUp')) this.z = Math.min(0.2, this.z + this.depthSpeed * dt);
+    if (input.isDown('ArrowUp')) this.z = Math.min(0.45, this.z + this.depthSpeed * dt);
     if (input.isDown('ArrowDown')) this.z = Math.max(0.0, this.z - this.depthSpeed * dt);
   } else {
-    if (input.isDown('ArrowUp')) this.z = Math.max(0.8, this.z - this.depthSpeed * dt);
+    if (input.isDown('ArrowUp')) this.z = Math.max(0.55, this.z - this.depthSpeed * dt);
     if (input.isDown('ArrowDown')) this.z = Math.min(1.0, this.z + this.depthSpeed * dt);
   }
 
   this.x = Math.max(0.04, Math.min(0.96, this.x));
+
+  // Track lateral speed for sidespin transfer on hit
+  this.vx = (this.x - prevX) / dt;
 
   if (input.consumePress('Space')) {
     this.swingTimer = 0.22;
@@ -400,8 +407,10 @@ Player.prototype.updateLocal = function (input, dt) {
 };
 
 Player.prototype.applyRemote = function (data) {
+  var prevX = this.x;
   this.x = data.x;
   this.z = data.z;
+  this.vx = this.x - prevX;   // lateral speed proxy (used for sidespin on hit)
   if (data.swinging && this.swingTimer <= 0) {
     this.swingTimer = 0.22;
   } else if (!data.swinging) {
@@ -411,20 +420,22 @@ Player.prototype.applyRemote = function (data) {
 
 Player.prototype.getHitboxZRange = function () {
   if (this.side === 0) {
-    return { min: 0.0, max: 0.22 };
+    return { min: 0.0, max: 0.45 };
   }
-  return { min: 0.78, max: 1.0 };
+  return { min: 0.55, max: 1.0 };
 };
 
 Player.prototype.canHit = function (ballX, ballZ, ballH) {
   if (ballH > 0.2) return false;
   if (this.swingTimer <= 0) return false;
 
-  var zRange = this.getHitboxZRange();
-  if (ballZ < zRange.min || ballZ > zRange.max) return false;
+  // Ball must be on player's side of the net
+  if (this.side === 0 && ballZ >= NET_Z) return false;
+  if (this.side === 1 && ballZ <= NET_Z) return false;
 
-  var reach = 0.14;
-  if (Math.abs(ballX - this.x) > reach) return false;
+  // Proximity: ball must be close to player's current position
+  if (Math.abs(ballX - this.x) > 0.12) return false;
+  if (Math.abs(ballZ - this.z) > 0.12) return false;
 
   return true;
 };
@@ -434,11 +445,13 @@ Player.prototype.canHitServe = function (ballX, ballZ, ballH) {
   if (ballH > 0.3) return false;
   if (this.swingTimer <= 0) return false;
 
-  var zRange = this.getHitboxZRange();
-  if (ballZ < zRange.min || ballZ > zRange.max) return false;
+  // Ball must be on player's side of the net
+  if (this.side === 0 && ballZ >= NET_Z) return false;
+  if (this.side === 1 && ballZ <= NET_Z) return false;
 
-  var reach = 0.2;
-  if (Math.abs(ballX - this.x) > reach) return false;
+  // Proximity: ball must be close to player's current position (slightly looser for serve)
+  if (Math.abs(ballX - this.x) > 0.18) return false;
+  if (Math.abs(ballZ - this.z) > 0.15) return false;
 
   return true;
 };
@@ -613,7 +626,12 @@ Ball.prototype.toss = function (server, serverX, serverZ) {
   this.lastHitBy = server;
 
   this.x = serverX;
-  this.z = serverZ;
+  // Clamp serve toss: must be far enough from net so the fixed parabola clears it
+  if (server === 1) {
+    this.z = Math.min(0.35, serverZ);
+  } else {
+    this.z = Math.max(0.65, serverZ);
+  }
 
   this.vx = 0;
   this.vz = 0;
@@ -621,7 +639,7 @@ Ball.prototype.toss = function (server, serverX, serverZ) {
   this.h = 0.01;
 };
 
-Ball.prototype.serveHit = function (server, serverX) {
+Ball.prototype.serveHit = function (server, serverX, serverVx) {
   this.lastHitBy = server;
 
   // Fixed forward velocity (direction depends on server)
@@ -631,9 +649,9 @@ Ball.prototype.serveHit = function (server, serverX) {
     this.vz = -VEL_AVANCO_FIXO;
   }
 
-  // Lateral: slight random variation so serves aren't identical
+  // Lateral: offset from racket center + player movement (sidespin effect)
   var targetX = 0.5 + (Math.random() - 0.5) * 0.3;
-  this.vx = (targetX - serverX) * 0.3;
+  this.vx = (targetX - serverX) * 0.3 + serverVx * FATOR_INFLUENCIA_LATERAL;
   if (this.vx > VEL_LATERAL_MAX) this.vx = VEL_LATERAL_MAX;
   if (this.vx < -VEL_LATERAL_MAX) this.vx = -VEL_LATERAL_MAX;
 
@@ -684,7 +702,7 @@ Ball.prototype.update = function (dt) {
   this.prevZ = this.z;
 };
 
-Ball.prototype.hit = function (playerNum, playerX, playerZ) {
+Ball.prototype.hit = function (playerNum, playerX, playerZ, playerVx) {
   if (!this.active) return;
   this.lastHitBy = playerNum;
 
@@ -695,9 +713,9 @@ Ball.prototype.hit = function (playerNum, playerX, playerZ) {
     this.vz = -VEL_AVANCO_FIXO;
   }
 
-  // Lateral: based on where on the racket the ball was hit
+  // Lateral: offset from racket center + player movement (sidespin effect)
   var offsetX = this.x - playerX;
-  this.vx = offsetX * 1.5;
+  this.vx = offsetX * 1.5 + playerVx * FATOR_INFLUENCIA_LATERAL;
   if (this.vx > VEL_LATERAL_MAX) this.vx = VEL_LATERAL_MAX;
   if (this.vx < -VEL_LATERAL_MAX) this.vx = -VEL_LATERAL_MAX;
 
@@ -1083,7 +1101,7 @@ Game.prototype.update = function (dt) {
 
       var serverPlayer = this.server === 1 ? this.p1 : this.p2;
       if (serverPlayer.canHitServe(this.ball.x, this.ball.z, this.ball.h)) {
-        this.ball.serveHit(this.server, serverPlayer.x);
+        this.ball.serveHit(this.server, serverPlayer.x, serverPlayer.vx);
         this.state = 'RALLY';
         this.sendServe(this.server);
         this.forceSend = true;
@@ -1123,13 +1141,13 @@ Game.prototype.update = function (dt) {
 
       // Collision: P1
       if (this.p1.canHit(this.ball.x, this.ball.z, this.ball.h)) {
-        this.ball.hit(1, this.p1.x, this.p1.z);
+        this.ball.hit(1, this.p1.x, this.p1.z, this.p1.vx);
         this.ball.justServed = false;
       }
 
       // Collision: P2
       if (this.p2.canHit(this.ball.x, this.ball.z, this.ball.h)) {
-        this.ball.hit(2, this.p2.x, this.p2.z);
+        this.ball.hit(2, this.p2.x, this.p2.z, this.p2.vx);
         this.ball.justServed = false;
       }
 
