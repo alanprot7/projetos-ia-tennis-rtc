@@ -479,16 +479,12 @@ Ball.prototype.serve = function (server, serverX) {
   this.h = 0.01;
 };
 
-Ball.prototype.toss = function (server, serverX) {
+Ball.prototype.toss = function (server, serverX, serverZ) {
   this.active = true;
   this.lastHitBy = server;
 
   this.x = serverX;
-  if (server === 1) {
-    this.z = 0.05;
-  } else {
-    this.z = 0.95;
-  }
+  this.z = serverZ;
 
   this.vx = 0;
   this.vz = 0;
@@ -918,7 +914,7 @@ Game.prototype.update = function (dt) {
     if (this.state === 'WAITING_SERVE') {
       var serverPlayer = this.server === 1 ? this.p1 : this.p2;
       if (serverPlayer.swingTimer > 0 && serverPlayer.swingTimer > 0.15) {
-        this.ball.toss(this.server, serverPlayer.x);
+        this.ball.toss(this.server, serverPlayer.x, serverPlayer.z);
         this.state = 'SERVE_TOSS';
         this.serveTossTimer = 0;
         this.forceSend = true;
