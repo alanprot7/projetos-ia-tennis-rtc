@@ -59,13 +59,21 @@
 
     <!-- GAME SCREEN -->
     <div id="game-screen" class="hidden">
-      <canvas id="game-canvas" width="800" height="600"></canvas>
-      <div id="hud">
-        <span id="score-p1">P1: 0</span>
-        <span id="score-p2">P2: 0</span>
+      <div id="court-area">
+        <canvas id="game-canvas" width="800" height="600"></canvas>
+        <div id="hud">
+          <span id="score-p1">P1: 0</span>
+          <span id="score-p2">P2: 0</span>
+        </div>
+        <button id="btn-restart" class="hidden">Reiniciar Partida</button>
+        <div id="state-indicator"></div>
       </div>
-      <button id="btn-restart" class="hidden">Reiniciar Partida</button>
-      <div id="state-indicator"></div>
+      <div id="touch-area">
+        <div id="touch-pad">
+          <div id="touch-dot"></div>
+        </div>
+        <div id="touch-hint">Deslize para mover<br>Toque para sacar/bater</div>
+      </div>
     </div>
 
   </div>

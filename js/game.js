@@ -15,13 +15,15 @@ var COURT_Y_BOTTOM = 520;
 var COURT_Y_TOP = 80;
 var NET_Z = 0.5;
 var NET_HEIGHT_WORLD = 0.06;
-var GRAVITY = 1.5;
-var SERVE_VZ = 0.42;
-var SERVE_VH = 1.1;
+
+// Fixed parabola constants (adjust to tune the arc)
+var VEL_SUBIDA_FIXA = 0.55;      // vertical impulse on hit (must clear net at z=0.5)
+var VEL_AVANCO_FIXO = 0.65;      // forward speed on hit
+var VEL_LATERAL_MAX = 0.10;      // max lateral speed on hit
+var GRAVIDADE = 1.5;             // gravity applied each second
+var RESTITUICAO_SOLO = 0.6;      // bounce restitution (0-1)
+
 var SERVE_TOSS_VH = 0.7;
-var HIT_BASE_SPEED = 0.35;
-var HIT_VH_MIN = 0.38;
-var HIT_VH_VAR = 0.12;
 var PHYSICS_DT = 1 / 60;
 
 function courtLeftAtZ(z) {
@@ -55,6 +57,8 @@ function worldToScreen(x, z) {
 function Input() {
   this.keys = {};
   this.justPressed = {};
+  this.virtualKeys = {};
+  this.virtualJustPressed = {};
 
   var self = this;
 
@@ -74,12 +78,19 @@ function Input() {
     self.keys[key] = false;
   };
 
+  this.setVirtualKey = function (key, state) {
+    if (state && !self.virtualKeys[key]) {
+      self.virtualJustPressed[key] = true;
+    }
+    self.virtualKeys[key] = !!state;
+  };
+
   window.addEventListener('keydown', this._onKeyDown);
   window.addEventListener('keyup', this._onKeyUp);
 }
 
 Input.prototype.isDown = function (key) {
-  return !!this.keys[key];
+  return !!this.keys[key] || !!this.virtualKeys[key];
 };
 
 Input.prototype.consumePress = function (key) {
@@ -87,16 +98,134 @@ Input.prototype.consumePress = function (key) {
     this.justPressed[key] = false;
     return true;
   }
+  if (this.virtualJustPressed[key]) {
+    this.virtualJustPressed[key] = false;
+    return true;
+  }
   return false;
 };
 
 Input.prototype.clearFrame = function () {
   this.justPressed = {};
+  this.virtualJustPressed = {};
 };
 
 Input.prototype.destroy = function () {
   window.removeEventListener('keydown', this._onKeyDown);
   window.removeEventListener('keyup', this._onKeyUp);
+};
+
+// ============================================================
+// TOUCH CONTROL (mobile touchpad)
+// ============================================================
+
+function TouchControl(element) {
+  this.element = element;
+  this.active = false;
+  this.startX = 0;
+  this.startY = 0;
+  this.deltaX = 0;
+  this.deltaY = 0;
+  this.tapped = false;
+
+  var self = this;
+  var deadZone = 15;
+  var maxDelta = 60;
+  var totalMovement = 0;
+  var startTime = 0;
+
+  function onStart(x, y) {
+    self.active = true;
+    self.startX = x;
+    self.startY = y;
+    self.deltaX = 0;
+    self.deltaY = 0;
+    totalMovement = 0;
+    startTime = Date.now();
+    self._updateDot(0, 0);
+  }
+
+  function onMove(x, y) {
+    if (!self.active) return;
+    var dx = x - self.startX;
+    var dy = y - self.startY;
+    totalMovement += Math.abs(dx - self.deltaX * maxDelta) + Math.abs(dy - self.deltaY * maxDelta);
+
+    if (Math.abs(dx) < deadZone) dx = 0;
+    if (Math.abs(dy) < deadZone) dy = 0;
+
+    self.deltaX = Math.max(-1, Math.min(1, dx / maxDelta));
+    self.deltaY = Math.max(-1, Math.min(1, dy / maxDelta));
+    self._updateDot(self.deltaX, self.deltaY);
+  }
+
+  function onEnd() {
+    if (!self.active) return;
+    self.active = false;
+
+    var elapsed = Date.now() - startTime;
+    if (elapsed < 200 && totalMovement < 20) {
+      self.tapped = true;
+    }
+
+    self.deltaX = 0;
+    self.deltaY = 0;
+    self._updateDot(0, 0);
+  }
+
+  this._updateDot = function (dx, dy) {
+    var dot = document.getElementById('touch-dot');
+    var pad = document.getElementById('touch-pad');
+    if (!dot || !pad) return;
+
+    var padW = pad.offsetWidth;
+    var padH = pad.offsetHeight;
+    var maxOffsetX = (padW - 36) / 2;
+    var maxOffsetY = (padH - 36) / 2;
+
+    dot.style.left = (50 + dx * (maxOffsetX / (padW / 2)) * 100) + '%';
+    dot.style.top = (50 + dy * (maxOffsetY / (padH / 2)) * 100) + '%';
+
+    if (self.active) {
+      dot.classList.add('active');
+    } else {
+      dot.classList.remove('active');
+    }
+  };
+
+  element.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    var t = e.touches[0];
+    onStart(t.clientX, t.clientY);
+  }, { passive: false });
+
+  element.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var t = e.touches[0];
+    onMove(t.clientX, t.clientY);
+  }, { passive: false });
+
+  element.addEventListener('touchend', function () { onEnd(); });
+  element.addEventListener('touchcancel', function () { onEnd(); });
+
+  element.addEventListener('mousedown', function (e) {
+    onStart(e.clientX, e.clientY);
+  });
+
+  element.addEventListener('mousemove', function (e) {
+    onMove(e.clientX, e.clientY);
+  });
+
+  element.addEventListener('mouseup', function () { onEnd(); });
+  element.addEventListener('mouseleave', function () { onEnd(); });
+}
+
+TouchControl.prototype.consumeTap = function () {
+  if (this.tapped) {
+    this.tapped = false;
+    return true;
+  }
+  return false;
 };
 
 // ============================================================
@@ -462,12 +591,12 @@ Ball.prototype.serve = function (server, serverX) {
     startZ = 0.02;
     this.z = startZ;
     dz = 0.58;
-    this.vz = SERVE_VZ;
+    this.vz = VEL_AVANCO_FIXO;
   } else {
     startZ = 0.98;
     this.z = startZ;
     dz = 0.58;
-    this.vz = -SERVE_VZ;
+    this.vz = -VEL_AVANCO_FIXO;
   }
 
   // Horizontal velocity toward target
@@ -475,7 +604,7 @@ Ball.prototype.serve = function (server, serverX) {
   var travelTime = Math.abs(dz / this.vz);
   this.vx = dx / travelTime;
 
-  this.vh = SERVE_VH;
+  this.vh = VEL_SUBIDA_FIXA;
   this.h = 0.01;
 };
 
@@ -495,16 +624,21 @@ Ball.prototype.toss = function (server, serverX, serverZ) {
 Ball.prototype.serveHit = function (server, serverX) {
   this.lastHitBy = server;
 
+  // Fixed forward velocity (direction depends on server)
   if (server === 1) {
-    this.vz = SERVE_VZ;
+    this.vz = VEL_AVANCO_FIXO;
   } else {
-    this.vz = -SERVE_VZ;
+    this.vz = -VEL_AVANCO_FIXO;
   }
 
+  // Lateral: slight random variation so serves aren't identical
   var targetX = 0.5 + (Math.random() - 0.5) * 0.3;
-  this.vx = (targetX - serverX) * 0.4;
+  this.vx = (targetX - serverX) * 0.3;
+  if (this.vx > VEL_LATERAL_MAX) this.vx = VEL_LATERAL_MAX;
+  if (this.vx < -VEL_LATERAL_MAX) this.vx = -VEL_LATERAL_MAX;
 
-  this.vh = 0.7 + this.h * 1.5;
+  // Fixed vertical impulse — always the same parabola
+  this.vh = VEL_SUBIDA_FIXA;
   this.justServed = true;
 };
 
@@ -513,7 +647,7 @@ Ball.prototype.update = function (dt) {
 
   this.justBounced = false;
 
-  this.vh -= GRAVITY * dt;
+  this.vh -= GRAVIDADE * dt;
 
   this.x += this.vx * dt;
   this.z += this.vz * dt;
@@ -522,9 +656,9 @@ Ball.prototype.update = function (dt) {
   // Ground bounce
   if (this.h <= 0) {
     this.h = 0;
-    if (Math.abs(this.vh) > 0.03) {
+    if (Math.abs(this.vh) > 0.02) {
       this.justBounced = true;
-      this.vh = Math.abs(this.vh) * 0.6;
+      this.vh = Math.abs(this.vh) * RESTITUICAO_SOLO;
       this.vx *= 0.92;
       this.vz *= 0.92;
     } else {
@@ -554,22 +688,21 @@ Ball.prototype.hit = function (playerNum, playerX, playerZ) {
   if (!this.active) return;
   this.lastHitBy = playerNum;
 
+  // Fixed forward velocity (direction depends on player)
   if (playerNum === 1) {
-    this.vz = Math.abs(this.vz) + HIT_BASE_SPEED;
+    this.vz = VEL_AVANCO_FIXO;
   } else {
-    this.vz = -(Math.abs(this.vz) + HIT_BASE_SPEED);
+    this.vz = -VEL_AVANCO_FIXO;
   }
 
-  // Angle based on hit position
+  // Lateral: based on where on the racket the ball was hit
   var offsetX = this.x - playerX;
-  this.vx += offsetX * 1.8;
+  this.vx = offsetX * 1.5;
+  if (this.vx > VEL_LATERAL_MAX) this.vx = VEL_LATERAL_MAX;
+  if (this.vx < -VEL_LATERAL_MAX) this.vx = -VEL_LATERAL_MAX;
 
-  // Clamp horizontal velocity
-  var maxVx = 0.22;
-  if (this.vx > maxVx) this.vx = maxVx;
-  if (this.vx < -maxVx) this.vx = -maxVx;
-
-  this.vh = HIT_VH_MIN + Math.random() * HIT_VH_VAR;
+  // Fixed vertical impulse — identical parabola every hit
+  this.vh = VEL_SUBIDA_FIXA;
   this.h = 0.01;
 };
 
@@ -672,10 +805,19 @@ function Game(canvas, isHost, peer, localPlayerNum) {
   this.forceSend = false;
   this.running = false;
   this.lastTime = 0;
+  this.serveTossTimer = 0;
 
+  this.initTouchControl();
   this.setupNetwork();
   this.setupRestartButton();
 }
+
+Game.prototype.initTouchControl = function () {
+  var touchEl = document.getElementById('touch-area');
+  if (touchEl) {
+    this.touchControl = new TouchControl(touchEl);
+  }
+};
 
 Game.prototype.setupNetwork = function () {
   var self = this;
@@ -886,6 +1028,20 @@ Game.prototype.loop = function (timestamp) {
 
 Game.prototype.update = function (dt) {
   var self = this;
+
+  // Feed touch control into input system (mobile)
+  if (this.touchControl) {
+    var tc = this.touchControl;
+    this.input.setVirtualKey('ArrowLeft', tc.deltaX < -0.3);
+    this.input.setVirtualKey('ArrowRight', tc.deltaX > 0.3);
+    this.input.setVirtualKey('ArrowUp', tc.deltaY < -0.3);
+    this.input.setVirtualKey('ArrowDown', tc.deltaY > 0.3);
+    if (tc.consumeTap()) {
+      this.input.setVirtualKey('Space', true);
+    } else {
+      this.input.setVirtualKey('Space', false);
+    }
+  }
 
   // Update local player (both host and guest)
   var local = this.localPlayerNum === 1 ? this.p1 : this.p2;

@@ -17,6 +17,8 @@ body {
   align-items: center;
   min-height: 100vh;
   overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: auto;
 }
 
 #app {
@@ -163,6 +165,10 @@ body {
   border: 4px solid #444;
 }
 
+#court-area {
+  position: relative;
+}
+
 #game-screen.hidden {
   display: none;
 }
@@ -239,14 +245,141 @@ body {
   display: none;
 }
 
+#touch-area {
+  display: none;
+}
+
 /* ============================================================
-   RESPONSIVE (opcional)
+   MOBILE LAYOUT
    ============================================================ */
 
 @media (max-width: 850px) {
+  body {
+    align-items: flex-start;
+    overflow: hidden;
+  }
+
   #app {
     width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
+
+  #lobby {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  #game-screen {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    border: none;
+    overflow: hidden;
+  }
+
+  #game-screen.hidden {
+    display: none;
+  }
+
+  #court-area {
+    flex: 1 1 0;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 0;
+    overflow: hidden;
+    border-bottom: 2px solid #333;
+  }
+
+  #game-canvas {
+    width: 100%;
+    height: auto;
+    max-height: 100%;
+    display: block;
+  }
+
+  /* Touch control area */
+  #touch-area {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    flex: 1 1 0;
+    min-height: 180px;
+    background: #111122;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+
+  #touch-pad {
+    width: 130px;
+    height: 130px;
+    border: 3px solid rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    position: relative;
+  }
+
+  #touch-pad.active {
+    border-color: rgba(204, 255, 0, 0.5);
+  }
+
+  #touch-dot {
+    width: 36px;
+    height: 36px;
+    background: rgba(204, 255, 0, 0.35);
+    border-radius: 50%;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    margin-left: -18px;
+    margin-top: -18px;
+    pointer-events: none;
+  }
+
+  #touch-dot.active {
+    background: rgba(204, 255, 0, 0.7);
+  }
+
+  #touch-hint {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 7px;
+    color: #555;
+    margin-top: 20px;
+    text-align: center;
+    line-height: 2;
+    pointer-events: none;
+  }
+
+  #hud {
+    top: 4px;
+    padding: 0 8px;
+  }
+
+  #score-p1,
+  #score-p2 {
+    font-size: 10px;
+    padding: 3px 6px;
+  }
+
+  #state-indicator {
+    font-size: 8px;
+    bottom: 6px;
+    padding: 4px 8px;
+  }
+
+  #btn-restart {
+    font-size: 9px;
+    padding: 8px 18px;
+    bottom: 30px;
+  }
+}
+
+@media (max-width: 850px) {
   #connection-panel {
     flex-direction: column;
     align-items: center;
